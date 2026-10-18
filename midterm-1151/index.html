@@ -10,11 +10,11 @@
 :root{--bg:#fff8ef;--card:#ffffff;--ink:#2b2d42;--muted:#6c6f86;--pri:#ff7a45;--pri2:#ffb703;--ok:#2a9d8f;--okbg:#e3f6f3;--bad:#e63946;--badbg:#fde8ea;--hl:#fff3a3;--line:#ecdcc8;--blue:#3a86ff}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:18px}
-header{background:linear-gradient(135deg,#ff7a45,#ffb703);color:#fff;padding:14px 16px 10px;position:sticky;top:0;z-index:5;box-shadow:0 2px 8px rgba(0,0,0,.1)}
+header{background:linear-gradient(135deg,#ff7a45,#ffb703);color:#fff;padding:14px 16px 10px;box-shadow:0 2px 8px rgba(0,0,0,.1)}
 header h1{margin:0;font-size:22px}
 header .sub{font-size:13px;opacity:.95}
-nav{display:flex;gap:6px;overflow-x:auto;padding:10px 12px;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:64px;z-index:4;-webkit-overflow-scrolling:touch}
-nav button{flex:0 0 auto;border:1px solid var(--line);background:#fff;border-radius:20px;padding:8px 14px;font-size:15px;color:var(--ink);cursor:pointer}
+nav{display:flex;gap:6px;overflow-x:auto;padding:10px 12px;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:4;-webkit-overflow-scrolling:touch}
+nav button{min-height:46px;flex:0 0 auto;border:1px solid var(--line);background:#fff;border-radius:20px;padding:8px 14px;font-size:15px;color:var(--ink);cursor:pointer}
 nav button.on{background:var(--pri);border-color:var(--pri);color:#fff;font-weight:600}
 main{max-width:860px;margin:0 auto;padding:16px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
@@ -82,6 +82,29 @@ input.ans:focus{border-color:var(--blue)}
 .oral .res{margin-top:8px;font-size:16px}
 .oral mark{background:#bff0d8;border-radius:4px;padding:0 2px}
 .note{font-size:13px;color:var(--muted)}
+
+.drillbar{position:sticky;top:68px;z-index:3;display:flex;align-items:center;gap:8px;background:var(--bg);padding:8px 0;margin:-6px 0 8px}
+.drillbar .dtitle{flex:1;font-weight:700;font-size:17px;text-align:center;line-height:1.2}
+.btn{min-height:50px}
+.btn.sm{min-height:50px;padding:8px 14px;font-size:16px}
+.btn.fin{background:#2a9d8f}
+.btn.rec{background:#e63946}
+.btn.okb{background:#2a9d8f}
+.btn.missb{background:#f4a261}
+.btn.on{outline:4px solid #2b2d42;outline-offset:2px}
+.btn:disabled{opacity:.45;cursor:default}
+.nav2{justify-content:space-between}
+.choice{min-height:56px}
+.chip{min-height:50px}
+.dots{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}
+.dot{width:14px;height:14px;border-radius:50%;background:#e5d6c2;display:inline-block}
+.dot.done{background:var(--ok)}
+.dot.miss{background:var(--bad)}
+.dot.cur{box-shadow:0 0 0 3px var(--blue)}
+.fb.warnfb{background:#fff4e0;color:#a35b00}
+.selfq{font-weight:700;margin-top:14px}
+.oral .os i{font-size:20px}
+@media (max-width:520px){.drillbar .dtitle{font-size:15px}.btn.sm{padding:8px 10px;font-size:14px}}
 </style>
 </head>
 <body>
@@ -484,139 +507,248 @@ const ORAL=[
 ];
 
 /* ====================== storage ====================== */
-const SKEY="audreyGrammar_P3U1U4_v2";
+const SKEY="audreyGrammar_1151_v3";
 let STATS={};
 try{STATS=JSON.parse(localStorage.getItem(SKEY)||"{}")||{};}catch(e){STATS={};}
 function saveStats(){try{localStorage.setItem(SKEY,JSON.stringify(STATS));}catch(e){}}
 
-/* ====================== app ====================== */
+/* ====== MC answer position: shuffle the stored choices once so the correct answer sits in a random slot ====== */
+questionBank.forEach(function(q){
+  if(q.type==="mc"){q.choices=shuffle(q.choices.slice());q.letter="ABCDE".charAt(q.choices.indexOf(q.answer[0]));}
+});
+
+/* ====================== TTS ====================== */
+let VOICE=null;
+function pickVoice(){
+  try{
+    const vs=window.speechSynthesis.getVoices()||[];
+    const pref=["Samantha","Karen","Google US English"];
+    VOICE=null;
+    for(let i=0;i<pref.length&&!VOICE;i++){for(let j=0;j<vs.length;j++){if(vs[j].name.indexOf(pref[i])>=0){VOICE=vs[j];break;}}}
+    if(!VOICE){for(let j=0;j<vs.length;j++){if(vs[j].lang==="en-US"){VOICE=vs[j];break;}}}
+  }catch(e){VOICE=null;}
+}
+if(window.speechSynthesis){pickVoice();window.speechSynthesis.onvoiceschanged=pickVoice;}
+function speak(t){
+  try{window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.lang="en-US";if(VOICE)u.voice=VOICE;u.rate=0.88;window.speechSynthesis.speak(u);}
+  catch(e){setStatus("Speech is not supported on this device.");}
+}
+
+/* ====================== app shell ====================== */
 const app=document.getElementById("app");
 const nav=document.getElementById("nav");
-let S=null;
+const EXAM_COUNT=30;
+let S=null,O=null,current="home";
 const NAVITEMS=[{key:"home",label:"🏠 Home"}].concat(TABS.map(function(t){return {key:t.key,label:t.icon+" "+t.name};}),[{key:"weak",label:"🔥 Fix My Mistakes"},{key:"mock",label:"🎯 Mock Exam"},{key:"oral",label:"🗣️ Oral Practice"}]);
-let current="home";
 function drawNav(){nav.innerHTML=NAVITEMS.map(function(n){return "<button class='"+(n.key===current?"on":"")+"' onclick=\"go('"+n.key+"')\">"+n.label+"</button>";}).join("");}
 function weakList(){return questionBank.filter(function(q){return q.weak;});}
 function tabList(key){return questionBank.filter(function(q){return q.tab===key;});}
-function drawMockExam(){return shuffle(questionBank.slice()).slice(0,30);}
+function drawMockExam(){return shuffle(questionBank.slice()).slice(0,EXAM_COUNT);}
 function go(key){
+  stopRecording();
+  if(window.speechSynthesis){try{window.speechSynthesis.cancel();}catch(e){}}
   current=key;drawNav();window.scrollTo(0,0);
   if(key==="home")return home();
-  if(key==="oral")return oral();
-  if(key==="mock")return startSession("mock","🎯 Mock Exam",drawMockExam());
-  if(key==="weak")return startSession("weak","🔥 Fix My Mistakes",shuffle(weakList().slice()));
+  if(key==="oral")return startOral();
+  if(key==="mock")return startSession("mock","🎯 Mock Exam",drawMockExam(),true);
+  if(key==="weak")return startSession("weak","🔥 Fix My Mistakes",shuffle(weakList().slice()),false);
   const t=TABS.filter(function(x){return x.key===key;})[0];
-  startSession(key,t.icon+" "+t.name,shuffle(tabList(key).slice()));
+  startSession(key,t.icon+" "+t.name,shuffle(tabList(key).slice()),false);
 }
 function pct(key){const s=STATS[key];return s?Math.round(s.best):0;}
 function home(){
   const days=Math.ceil((new Date(2026,9,22)-new Date(new Date().toDateString()))/86400000);
   let h="<div class='intro' style='border-left:6px solid var(--pri)'><h2>📝 Grammar Midterm: Thu 10/22 "+(days>0?"· "+days+" day"+(days>1?"s":"")+" to go!":days===0?"· Today! Good luck! 🍀":"")+"</h2><div style='font-size:16px;line-height:1.6'>Pathway 3 · Unit 1 (p.4-13) · Unit 4 (p.34-36)<br>✅ Spell the Ordinal Numbers table<br>✅ Waiting in line &amp; “lives on the ___ floor”<br>✅ How often…?<br>✅ He / She / It + does, verb + s / es / ies — <b>don't forget the s!</b><br>✅ Prepositions: in front of, under, next to, between…<br>✅ What's the weather like?</div></div>";
-  h+="<div class='intro'><h2>Hi Audrey! 👋</h2><div>Pick a topic and practice. Press <b>Check Answer</b> after each question. The <b>🎯 Mock Exam</b> gives you 30 new random questions every time!</div><div class='note' style='margin-top:6px'>Question bank: "+questionBank.length+" questions</div></div><div class='grid'>";
+  h+="<div class='intro'><h2>Hi Audrey! 👋</h2><div>Pick a topic and practice. Press <b>Check Answer</b> after each question. Tap <b>🏁 Finish &amp; Score</b> any time to see your score.</div><div class='note' style='margin-top:6px'>Question bank: "+questionBank.length+" questions</div></div><div class='grid'>";
   TABS.forEach(function(t){h+=card(t.key,t.icon,t.name,t.desc,tabList(t.key).length);});
   h+=card("weak","🔥","Fix My Mistakes","Question types you missed on your quizzes",weakList().length);
-  h+=card("mock","🎯","Mock Exam","30 random questions from every topic",30);
-  h+="<div class='tcard' onclick=\"go('oral')\"><div class='ic'>🗣️</div><h3>Oral Practice</h3><div class='meta'>"+ORAL.length+" speaking cards</div></div>";
+  h+=card("mock","🎯","Mock Exam",EXAM_COUNT+" random questions · one per page",EXAM_COUNT);
+  h+="<div class='tcard' onclick=\"go('oral')\"><div class='ic'>🗣️</div><h3>Oral Practice</h3><div class='meta'>"+ORAL.length+" speaking questions · record your voice</div></div>";
   app.innerHTML=h+"</div>";
 }
 function card(key,ic,name,desc,n){const p=pct(key);return "<div class='tcard' onclick=\"go('"+key+"')\"><div class='ic'>"+ic+"</div><h3>"+name+"</h3><div class='meta'>"+desc+"</div><div class='meta' style='margin-top:6px'>"+n+" questions · best "+p+"%</div><div class='bar'><i style='width:"+p+"%'></i></div></div>";}
-function startSession(key,title,list){
-  S={key:key,title:title,list:list.map(function(q){const c=Object.assign({},q);if(c.choices)c.order=shuffle(c.choices.slice());if(c.words)c.wordOrder=shuffle(c.words.map(function(w){return {w:w};}));return c;}),idx:0,res:[],checked:false,sel:null,built:[]};
-  renderQ();
-}
-function renderQ(){
-  const q=S.list[S.idx];const n=S.list.length;
-  let h="";
-  if(S.key==="mock")h+="<div class='btns' style='margin:0 0 12px'><button class='btn blue' onclick=\"go('mock')\">🔀 New Random Set</button></div>";
-  h+="<div class='prog'><i style='width:"+(S.idx/n*100)+"%'></i></div><div class='qcard'><div class='qtop'><span>"+S.title+"</span><span>Question "+(S.idx+1)+" / "+n+"</span></div>";
-  h+="<div class='ins'>"+q.ins+"</div>";
+function drillBar(title){return "<div class='drillbar'><button class='btn sec sm' onclick=\"go('home')\">← Home</button><div class='dtitle'>"+title+"</div><button class='btn fin sm' onclick='finishNow()'>🏁 Finish &amp; Score</button></div>";}
+function finishNow(){if(current==="oral")finishOral();else if(S)finish();}
+
+/* ====================== question rendering ====================== */
+function isAnswered(q,g){if(q.type==="mc")return typeof g==="number";if(q.type==="unscramble")return !!(g&&g.length);return !!(g&&String(g).trim());}
+function givenText(q,g){if(q.type==="mc")return q.choices[g];if(q.type==="unscramble")return g.map(function(i){return q.wordOrder[i];}).join(" ");return String(g);}
+function isRight(q,g){const t=norm(givenText(q,g));return q.answer.some(function(x){return norm(x)===t;});}
+function correctText(q){return q.type==="mc"?q.letter+". "+q.answer[0]:q.answer[0];}
+function attr(s){return esc(s).replace(/'/g,"&#39;");}
+function qBody(q,g,locked){
+  let h="<div class='ins'>"+q.ins+"</div>";
   if(q.ctx)h+="<div class='ctx'>"+q.ctx+"</div>";
   if(q.question)h+="<div class='qtext'>"+q.question+"</div>";
   if(q.type==="mc"){
-    h+="<div class='choices'>"+q.order.map(function(c,i){return "<button class='choice' data-i='"+i+"' onclick='pick("+i+")'><b>"+"ABCDE"[i]+".</b> "+esc(c)+"</button>";}).join("")+"</div>";
+    h+="<div class='choices'>"+q.choices.map(function(c,i){return "<button class='choice"+(g===i?" sel":"")+"' data-i='"+i+"' onclick='pick("+i+")'"+(locked?" disabled":"")+"><b>"+"ABCDE".charAt(i)+".</b> "+esc(c)+"</button>";}).join("")+"</div>";
   }else if(q.type==="unscramble"){
-    h+="<div class='build' id='build' style='margin-top:12px'></div><div class='chips'>"+q.wordOrder.map(function(o,i){return "<button class='chip' id='chip"+i+"' onclick='addWord("+i+")'>"+esc(o.w)+"</button>";}).join("")+"</div><button class='btn sec sm' onclick='resetWords()'>↺ Reset</button>";
+    const b=g||[];
+    h+="<div class='build'>"+b.map(function(i,k){return "<button class='chip' onclick='removeWord("+k+")'"+(locked?" disabled":"")+">"+esc(q.wordOrder[i])+"</button>";}).join("")+"</div>";
+    h+="<div class='chips'>"+q.wordOrder.map(function(w,i){return "<button class='chip"+(b.indexOf(i)>=0?" used":"")+"' onclick='addWord("+i+")'"+(locked?" disabled":"")+">"+esc(w)+"</button>";}).join("")+"</div>";
+    if(!locked)h+="<button class='btn sec sm' onclick='resetWords()'>↺ Reset</button>";
   }else{
-    h+="<input class='ans' id='ans' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' placeholder='"+(q.type==="sentence"?"Write a full sentence…":"Type your answer…")+"' onkeydown='if(event.key===\"Enter\"){checkAns();}'>";
+    h+="<input class='ans' id='ans' value='"+attr(g||"")+"'"+(locked?" disabled":"")+" autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' placeholder='"+(q.type==="sentence"?"Write a full sentence…":"Type your answer…")+"' oninput='typed(this.value)' onkeydown='if(event.key===\"Enter\"){enterKey();}'>";
   }
-  h+="<div id='fb'></div><div class='btns'><button class='btn' id='chk' onclick='checkAns()'>Check Answer</button><button class='btn blue' id='nxt' onclick='nextQ()' style='display:none'>"+(S.idx+1<n?"Next ➜":"Submit &amp; See My Score 🏁")+"</button></div></div>";
-  app.innerHTML=h;S.checked=false;S.sel=null;S.built=[];
-  const a=document.getElementById("ans");if(a){try{a.focus();}catch(e){}}
+  return h;
 }
-function pick(i){if(S.checked)return;S.sel=i;document.querySelectorAll(".choice").forEach(function(b){b.classList.toggle("sel",Number(b.getAttribute("data-i"))===i);});}
-function addWord(i){if(S.checked)return;S.built.push(i);document.getElementById("chip"+i).classList.add("used");drawBuild();}
-function removeWord(k){if(S.checked)return;const i=S.built[k];S.built.splice(k,1);document.getElementById("chip"+i).classList.remove("used");drawBuild();}
-function resetWords(){if(S.checked)return;S.built=[];document.querySelectorAll(".chip").forEach(function(c){c.classList.remove("used");});drawBuild();}
-function drawBuild(){const q=S.list[S.idx];document.getElementById("build").innerHTML=S.built.map(function(i,k){return "<button class='chip' onclick='removeWord("+k+")'>"+esc(q.wordOrder[i].w)+"</button>";}).join("");}
-function checkAns(){
-  if(S.checked)return;
-  const q=S.list[S.idx];let given="";
-  if(q.type==="mc"){if(S.sel===null){flash("Please choose an answer first.");return;}given=q.order[S.sel];}
-  else if(q.type==="unscramble"){if(!S.built.length){flash("Tap the words to build the sentence.");return;}given=S.built.map(function(i){return q.wordOrder[i].w;}).join(" ");}
-  else{given=document.getElementById("ans").value;if(!given.trim()){flash("Please type your answer first.");return;}}
-  const ok=q.answer.some(function(x){return norm(x)===norm(given);});
-  S.checked=true;S.res[S.idx]={q:q,given:given,ok:ok};
-  if(q.type==="mc"){document.querySelectorAll(".choice").forEach(function(b){const i=Number(b.getAttribute("data-i"));b.disabled=true;if(i===S.sel)b.classList.add(ok?"right":"wrong");});}
-  const inp=document.getElementById("ans");if(inp)inp.disabled=true;
-  document.querySelectorAll(".chip").forEach(function(c){c.disabled=true;});
-  document.getElementById("fb").innerHTML=ok?"<div class='fb ok'>Correct! Great job! ✓</div>":"<div class='fb bad'>✗ Not quite.</div><div class='correct'><small>Correct answer:</small>"+esc(q.answer[0])+"</div>";
-  document.getElementById("chk").style.display="none";
-  const nb=document.getElementById("nxt");nb.style.display="inline-block";try{nb.focus();}catch(e){}
+function startSession(key,title,list,isMock){
+  S={key:key,title:title,mock:isMock,list:list.map(function(q){const c=Object.assign({},q);if(c.words)c.wordOrder=shuffle(c.words.slice());return c;}),idx:0,res:[],given:[]};
+  render();
 }
-function flash(m){document.getElementById("fb").innerHTML="<div class='fb bad' style='background:#fff4e0;color:#a35b00'>"+m+"</div>";}
-function nextQ(){if(!S.checked)return;if(S.idx+1<S.list.length){S.idx++;renderQ();window.scrollTo(0,0);}else finish();}
-function strip(s){return String(s).replace(/<[^>]+>/g,"");}
-function finish(){
-  const n=S.list.length;const sc=S.res.filter(function(r){return r&&r.ok;}).length;const p=Math.round(sc/n*100);
-  const stars=p>=95?5:p>=85?4:p>=70?3:p>=50?2:1;
-  const prev=STATS[S.key]||{best:0,tries:0};STATS[S.key]={best:Math.max(prev.best,p),tries:prev.tries+1,last:p};saveStats();
-  const rows=S.res.slice().sort(function(a,b){return (a.ok?1:0)-(b.ok?1:0);});
-  let h="<div class='qcard score'><div>"+S.title+"</div><div class='big'>"+sc+" / "+n+"</div><div class='stars'>"+"⭐".repeat(stars)+"</div><div style='font-size:22px;margin:6px 0'>"+p+"% "+(p>=90?"Amazing! 🎉":p>=70?"Good job! 👍":"Keep practicing! 💪")+"</div><div class='btns' style='justify-content:center'>";
-  h+=S.key==="mock"?"<button class='btn blue' onclick=\"go('mock')\">🔀 New Random Set</button>":"<button class='btn' onclick=\"go('"+S.key+"')\">↺ Try Again</button>";
-  h+="<button class='btn sec' onclick=\"go('home')\">🏠 Home</button></div></div><h3 style='margin:18px 4px 6px'>Review (mistakes first)</h3>";
-  rows.forEach(function(r){const qt=r.q.question?strip(r.q.question):strip(r.q.ins);h+="<div class='rev "+(r.ok?"":"x")+"'><div class='q'>"+(r.ok?"✓ ":"✗ ")+esc(qt)+"</div><div>Your answer: <b>"+esc(r.given)+"</b></div><div>Correct answer: <span style='background:var(--hl);padding:2px 6px;border-radius:6px;font-weight:700'>"+esc(r.q.answer[0])+"</span></div></div>";});
-  app.innerHTML=h;window.scrollTo(0,0);
-}
+function render(){if(S.mock)renderMock();else renderDrill();}
+function cur(){return S.list[S.idx];}
+function isLocked(){return !S.mock&&!!S.res[S.idx];}
+function fbHtml(q,r){return r.ok?"<div class='fb ok'>Correct! Great job! ✓</div>":"<div class='fb bad'>✗ Not quite.</div><div class='correct'><small>Correct answer:</small>"+esc(correctText(q))+"</div>";}
 
-/* ====================== Oral ====================== */
-const REC={mr:null,chunks:[],url:{}};
-function oral(){
-  let h="<div class='intro'><h2>🗣️ Oral Practice</h2><div>Listen to the question, say your answer in a full sentence, and check your key words.</div><div class='note' style='margin-top:6px'>Estimated — confirm with teacher. (Based on the personal questions in Pathway 3 Unit 1 &amp; 4 and the worksheets.)</div></div>";
-  ORAL.forEach(function(o,i){
-    h+="<div class='oral'><div class='oq'>"+(i+1)+". "+esc(o.q)+"</div><div class='os'>💬 Sample answer: <b>"+esc(o.s)+"</b></div><div class='ok2'>Key words: "+o.k.map(function(k){return k.split("|").slice(0,4).join(" / ");}).join(" · ")+"</div>"+
-    "<div class='btns'><button class='btn sec sm' onclick='speak(ORAL["+i+"].q)'>🔊 Hear Q</button><button class='btn sec sm' id='rec"+i+"' onclick='toggleRec("+i+")'>⏺ Record</button><button class='btn sec sm' onclick='playRec("+i+")'>▶ Play back</button><button class='btn sm' onclick='scoreMe("+i+")'>🎯 Score Me</button></div><div class='res' id='res"+i+"'></div></div>";
-  });
+/* ---- drill mode (topic tabs, Fix My Mistakes) ---- */
+function renderDrill(){
+  const q=cur(),n=S.list.length,r=S.res[S.idx],locked=!!r;
+  const ok=S.res.filter(function(x){return x&&x.ok;}).length;
+  let h=drillBar(S.title)+"<div class='prog'><i style='width:"+(S.idx/n*100)+"%'></i></div><div class='qcard'><div class='qtop'><span>Question "+(S.idx+1)+" / "+n+"</span><span>✓ "+ok+" correct</span></div>"+qBody(q,S.given[S.idx],locked);
+  h+="<div id='fb'>"+(r?fbHtml(q,r):"")+"</div><div class='btns'>"+(locked?"<button class='btn blue' id='nxt' onclick='nextQ()'>"+(S.idx+1<n?"Next ➜":"See My Score 🏁")+"</button>":"<button class='btn' onclick='checkAns()'>Check Answer</button>")+"</div></div>";
+  app.innerHTML=h;
+  if(locked&&q.type==="mc"){
+    document.querySelectorAll(".choice").forEach(function(b){const i=Number(b.getAttribute("data-i"));if(q.choices[i]===q.answer[0])b.classList.add("right");else if(i===S.given[S.idx])b.classList.add("wrong");});
+  }
+  const f=locked?document.getElementById("nxt"):document.getElementById("ans");
+  if(f){try{f.focus();}catch(e){}}
+}
+function pick(i){
+  if(isLocked())return;
+  S.given[S.idx]=i;
+  document.querySelectorAll(".choice").forEach(function(b){b.classList.toggle("sel",Number(b.getAttribute("data-i"))===i);});
+  if(S.mock)updateProgress();
+}
+function addWord(i){if(isLocked())return;const g=(S.given[S.idx]||[]).slice();if(g.indexOf(i)>=0)return;g.push(i);S.given[S.idx]=g;render();}
+function removeWord(k){if(isLocked())return;const g=(S.given[S.idx]||[]).slice();g.splice(k,1);S.given[S.idx]=g;render();}
+function resetWords(){if(isLocked())return;S.given[S.idx]=[];render();}
+function typed(v){if(isLocked())return;S.given[S.idx]=v;if(S.mock)updateProgress();}
+function enterKey(){if(S.mock){if(S.idx+1<S.list.length)nextM();}else if(S.res[S.idx])nextQ();else checkAns();}
+function flash(m){const f=document.getElementById("fb");if(f)f.innerHTML="<div class='fb warnfb'>"+m+"</div>";}
+function checkAns(){
+  if(S.res[S.idx])return;
+  const q=cur(),g=S.given[S.idx];
+  if(!isAnswered(q,g)){flash(q.type==="mc"?"Please choose an answer first.":q.type==="unscramble"?"Tap the words to build the sentence.":"Please type your answer first.");return;}
+  S.res[S.idx]={q:q,given:givenText(q,g),ok:isRight(q,g)};
+  renderDrill();
+}
+function nextQ(){if(!S.res[S.idx])return;if(S.idx+1<S.list.length){S.idx++;renderDrill();window.scrollTo(0,0);}else finish();}
+
+/* ---- mock exam: one question per page, prev / next, dot bar ---- */
+function renderMock(){
+  const q=cur(),n=S.list.length;
+  let h=drillBar(S.title)+"<div class='btns' style='margin:0 0 10px'><button class='btn blue sm' onclick=\"go('mock')\">🔀 New Random Set</button></div>";
+  h+="<div class='dots' id='dots'>"+dotsHtml()+"</div>";
+  h+="<div class='qcard'><div class='qtop'><span>Question "+(S.idx+1)+" / "+n+"</span><span id='acount'>"+answeredCount()+" answered</span></div>"+qBody(q,S.given[S.idx],false);
+  h+="<div id='fb'></div><div class='btns nav2'><button class='btn sec' onclick='prevM()'"+(S.idx===0?" disabled":"")+">◀ Prev</button>"+(S.idx+1<n?"<button class='btn blue' onclick='nextM()'>Next ▶</button>":"<button class='btn' onclick='finish()'>Submit 🏁</button>")+"</div></div>";
   app.innerHTML=h;
 }
-function speak(t){try{window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.lang="en-US";u.rate=0.85;window.speechSynthesis.speak(u);}catch(e){alert("Speech is not supported on this device.");}}
-function toggleRec(i){
-  const b=document.getElementById("rec"+i);const out=document.getElementById("res"+i);
-  if(REC.mr&&REC.mr.state==="recording"){REC.mr.stop();return;}
-  if(!navigator.mediaDevices||!window.MediaRecorder){out.textContent="Recording is not supported in this browser.";return;}
-  navigator.mediaDevices.getUserMedia({audio:true}).then(function(stream){
-    REC.chunks=[];const mr=new MediaRecorder(stream);REC.mr=mr;
-    mr.ondataavailable=function(e){if(e.data&&e.data.size)REC.chunks.push(e.data);};
-    mr.onstop=function(){const blob=new Blob(REC.chunks,{type:mr.mimeType||"audio/mp4"});REC.url[i]=URL.createObjectURL(blob);stream.getTracks().forEach(function(t){t.stop();});b.textContent="⏺ Record";out.textContent="Recorded! Tap ▶ Play back.";};
-    mr.start();b.textContent="⏹ Stop";out.textContent="Recording… tap ⏹ Stop when you finish.";
-  }).catch(function(){out.textContent="Microphone permission was not given.";});
+function dotsHtml(){return S.list.map(function(q,i){return "<span class='dot"+(i===S.idx?" cur":"")+(isAnswered(q,S.given[i])?" done":"")+"'></span>";}).join("");}
+function answeredCount(){let c=0;S.list.forEach(function(q,i){if(isAnswered(q,S.given[i]))c++;});return c;}
+function updateProgress(){const d=document.getElementById("dots");if(d)d.innerHTML=dotsHtml();const a=document.getElementById("acount");if(a)a.textContent=answeredCount()+" answered";}
+function prevM(){if(S.idx>0){S.idx--;renderMock();window.scrollTo(0,0);}}
+function nextM(){if(S.idx+1<S.list.length){S.idx++;renderMock();window.scrollTo(0,0);}}
+
+/* ---- scoring ---- */
+function stars(p){return p>=90?5:p>=75?4:p>=55?3:p>=40?2:1;}
+function finish(){
+  if(!S)return;
+  let rows=[];
+  if(S.mock){S.list.forEach(function(q,i){const g=S.given[i];if(isAnswered(q,g))rows.push({q:q,given:givenText(q,g),ok:isRight(q,g)});});}
+  else rows=S.res.filter(function(r){return !!r;});
+  const title=S.title,key=S.key,total=S.mock?S.list.length:0;
+  S=null;
+  showResult(title,key,rows,total,false);
 }
-function playRec(i){if(!REC.url[i]){document.getElementById("res"+i).textContent="Record your answer first.";return;}new Audio(REC.url[i]).play();}
-function scoreMe(i){
-  const out=document.getElementById("res"+i);
-  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  if(!SR){out.textContent="Speech scoring isn't supported in this browser. Try Safari or Chrome.";return;}
-  const r=new SR();r.lang="en-US";r.interimResults=false;r.maxAlternatives=1;
-  out.textContent="🎙️ Listening… speak now!";
-  r.onresult=function(e){
-    const said=e.results[0][0].transcript;const ns=" "+norm(said)+" ";const o=ORAL[i];let hit=0;
-    o.k.forEach(function(k){if(k.split("|").some(function(a){return ns.indexOf(norm(a))>=0;}))hit++;});
-    const kw={};o.k.forEach(function(k){k.split("|").forEach(function(a){norm(a).split(" ").forEach(function(w){kw[w]=1;});});});
-    const marked=said.split(/\s+/).map(function(w){return kw[norm(w)]?"<mark>"+esc(w)+"</mark>":esc(w);}).join(" ");
-    const p=Math.round(hit/o.k.length*100);
-    out.innerHTML="You said: “"+marked+"”<br><b>Key-word match: "+p+"%</b> "+(p===100?"🌟 Excellent!":p>=50?"👍 Good! Try to use all the key words.":"💪 Try again with a full sentence.");
-  };
-  r.onerror=function(){out.textContent="I couldn't hear you. Please try again.";};
-  try{r.start();}catch(e){out.textContent="Please try again.";}
+function showResult(title,key,rows,total,isOral){
+  const x=rows.length,y=rows.filter(function(r){return r.ok;}).length,p=x?Math.round(y/x*100):0;
+  let h="<div class='qcard score'><div>"+title+"</div>";
+  if(!x){h+="<div style='font-size:20px;margin:18px 0'>"+(isOral?"Show the model answer and mark how you did first.":"You haven't answered any questions yet.")+"</div>";}
+  else{
+    const prev=STATS[key]||{best:0,tries:0};STATS[key]={best:Math.max(prev.best,p),tries:prev.tries+1,last:p};saveStats();
+    h+="<div class='big'>"+y+" / "+x+"</div><div style='font-size:19px'>Answered "+x+" question"+(x>1?"s":"")+(total?" (of "+total+")":"")+" — "+y+(isOral?" got it":" correct")+" ("+p+"%)</div><div class='stars'>"+"⭐".repeat(stars(p))+"</div><div style='font-size:20px;margin:6px 0'>"+(p>=90?"Amazing! 🎉":p>=75?"Great job! 👍":p>=55?"Good try! 💪":"Keep practicing! 💪")+"</div>";
+  }
+  h+="<div class='btns' style='justify-content:center'><button class='btn' onclick=\"go('"+current+"')\">"+(current==="mock"?"🔀 Try Again (new set)":"↺ Try Again")+"</button><button class='btn sec' onclick=\"go('home')\">🏠 Home</button></div></div>";
+  const wrong=rows.filter(function(r){return !r.ok;}),right=rows.filter(function(r){return r.ok;});
+  if(x)h+="<h3 style='margin:18px 4px 6px'>"+(wrong.length?(isOral?"Practice these again":"Review (mistakes first)"):"No mistakes — perfect! 🌟")+"</h3>";
+  wrong.concat(isOral?[]:right).forEach(function(r){
+    const qt=r.q.question?strip(r.q.question):strip(r.q.ins);
+    h+="<div class='rev "+(r.ok?"":"x")+"'><div class='q'>"+(r.ok?"✓ ":"✗ ")+esc(qt)+"</div>"+(isOral?"":"<div>Your answer: <b>"+esc(r.given)+"</b></div>")+"<div>"+(isOral?"Model answer: ":"Correct answer: ")+"<span style='background:var(--hl);padding:2px 6px;border-radius:6px;font-weight:700'>"+esc(correctText(r.q))+"</span></div></div>";
+  });
+  app.innerHTML=h;window.scrollTo(0,0);
+}
+function strip(s){return String(s).replace(/<[^>]+>/g,"");}
+
+/* ====================== Oral Practice ====================== */
+const recordings={};
+let mediaRecorder=null;
+const WARN="<div style='background:#1a0a2a;border:2px solid #a855f7;color:#e9d5ff;border-radius:12px;padding:14px 16px;margin-bottom:16px;font-size:0.85rem;line-height:1.7;'><strong style='color:#c084fc;'>Recording requires Safari or Chrome</strong><br>Open this page in Safari (iOS) or Chrome — not inside another app.<br>iOS: tap ... → Open in Safari</div>";
+function setStatus(m){const e=document.getElementById("ostatus");if(e)e.textContent=m;}
+function stopRecording(){try{if(mediaRecorder&&mediaRecorder.state==="recording")mediaRecorder.stop();}catch(e){}}
+function startOral(){O={idx:0,shown:{},self:{}};renderOral();}
+function renderOral(){
+  const o=ORAL[O.idx],n=ORAL.length,i=O.idx;
+  let h=drillBar("🗣️ Oral Practice")+WARN+"<div class='note' style='margin-bottom:8px'>Estimated questions — confirm with teacher.</div>";
+  h+="<div class='dots'>"+ORAL.map(function(x,j){return "<span class='dot"+(j===i?" cur":"")+(O.self[j]==="ok"?" done":O.self[j]==="miss"?" miss":"")+"'></span>";}).join("")+"</div>";
+  h+="<div class='oral'><div class='qtop'><span>Question "+(i+1)+" / "+n+"</span></div><div class='oq'>"+esc(o.q)+"</div>";
+  h+="<div class='btns'><button class='btn sec' id='hearQ'>🔊 Hear Q</button><button class='btn rec' id='recBtn'>⏺ Record</button><button class='btn sec' id='playBtn'>▶ My Voice</button></div>";
+  h+="<div class='res' id='ostatus'>"+(recordings[i]?"Your answer is recorded. Tap ▶ My Voice to listen.":"")+"</div>";
+  if(!O.shown[i])h+="<div class='btns'><button class='btn blue' id='showBtn'>👁 Show Model Answer</button></div>";
+  else h+="<div class='os'>📝 Model answer:<br><b><i>“"+esc(o.s)+"”</i></b><div class='btns'><button class='btn sec sm' id='hearA'>🔊 Hear Model Answer</button></div></div><div class='selfq'>How did you do?</div><div class='btns'><button class='btn okb"+(O.self[i]==="ok"?" on":"")+"' id='selfOk'>✅ I got it</button><button class='btn missb"+(O.self[i]==="miss"?" on":"")+"' id='selfMiss'>🔁 Need practice</button></div>";
+  h+="<div class='btns nav2'><button class='btn sec' id='oPrev'"+(i===0?" disabled":"")+">◀ Prev</button><button class='btn blue' id='oNext'>"+(i+1<n?"Next ▶":"See My Score 🏁")+"</button></div></div>";
+  app.innerHTML=h;
+  bindOral();
+}
+function bindOral(){
+  document.getElementById("hearQ").addEventListener("click",function(){speak(ORAL[O.idx].q);});
+  const recBtn=document.getElementById("recBtn");
+  recBtn.addEventListener("click",function(){
+    if(mediaRecorder&&mediaRecorder.state==="recording"){mediaRecorder.stop();return;}
+    if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia||!window.MediaRecorder){setStatus("Recording is not supported here. Open this page in Safari or Chrome.");return;}
+    const idx=O.idx;
+    navigator.mediaDevices.getUserMedia({audio:true,video:false}).then(function(stream){
+      const audioChunks=[];
+      const types=["audio/mp4","audio/aac","audio/webm;codecs=opus","audio/webm","audio/ogg"];
+      let mime="";
+      for(let k=0;k<types.length;k++){if(MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported(types[k])){mime=types[k];break;}}
+      mediaRecorder=mime?new MediaRecorder(stream,{mimeType:mime}):new MediaRecorder(stream);
+      mediaRecorder.ondataavailable=function(e){if(e.data&&e.data.size>0)audioChunks.push(e.data);};
+      mediaRecorder.onstop=function(){
+        stream.getTracks().forEach(function(t){t.stop();});
+        if(recordings[idx]){try{URL.revokeObjectURL(recordings[idx]);}catch(e){}}
+        recordings[idx]=URL.createObjectURL(new Blob(audioChunks,{type:mime||"audio/webm"}));
+        if(O&&O.idx===idx){const b=document.getElementById("recBtn");if(b)b.textContent="⏺ Record";setStatus("Recorded! Tap ▶ My Voice to listen.");}
+      };
+      mediaRecorder.start(200);
+      recBtn.textContent="⏹ Stop";
+      setStatus("🔴 Recording… tap ⏹ Stop when you finish.");
+    }).catch(function(err){
+      const nm=err&&err.name;
+      setStatus(nm==="NotAllowedError"?"Microphone is blocked. Allow the microphone for this page in Safari / Chrome settings, then try again.":nm==="NotFoundError"?"No microphone was found on this device.":nm==="NotReadableError"?"The microphone is being used by another app.":"Could not start recording: "+((err&&err.message)||nm));
+    });
+  });
+  document.getElementById("playBtn").addEventListener("click",function(){
+    const url=recordings[O.idx];
+    if(!url){setStatus("Record your answer first.");return;}
+    const audio=new Audio();
+    audio.src=url;
+    const p=audio.play();
+    if(p!==undefined)p.catch(function(err){setStatus(err.message);});
+  });
+  const sb=document.getElementById("showBtn");if(sb)sb.addEventListener("click",function(){O.shown[O.idx]=true;renderOral();});
+  const ha=document.getElementById("hearA");if(ha)ha.addEventListener("click",function(){speak(ORAL[O.idx].s);});
+  const so=document.getElementById("selfOk");if(so)so.addEventListener("click",function(){O.self[O.idx]="ok";renderOral();});
+  const sm=document.getElementById("selfMiss");if(sm)sm.addEventListener("click",function(){O.self[O.idx]="miss";renderOral();});
+  document.getElementById("oPrev").addEventListener("click",function(){if(O.idx>0){stopRecording();O.idx--;renderOral();window.scrollTo(0,0);}});
+  document.getElementById("oNext").addEventListener("click",function(){stopRecording();if(O.idx+1<ORAL.length){O.idx++;renderOral();window.scrollTo(0,0);}else finishOral();});
+}
+function finishOral(){
+  if(!O)return;
+  stopRecording();
+  const rows=[];
+  ORAL.forEach(function(o,i){if(O.self[i])rows.push({q:{type:"oral",question:o.q,ins:"",answer:[o.s]},given:"",ok:O.self[i]==="ok"});});
+  showResult("🗣️ Oral Practice","oral",rows,0,true);
 }
 
 drawNav();home();
